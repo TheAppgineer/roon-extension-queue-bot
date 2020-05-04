@@ -24,59 +24,51 @@ const RoonApi          = require('node-roon-api'),
 var core = undefined;
 var transport = undefined;
 var waiting_zones = {};
-var zone_names = {};
+var monitoring_zones = {};
 
 var roon = new RoonApi({
     extension_id:        'com.theappgineer.queue-bot',
     display_name:        QUEUE_BOT,
-    display_version:     '0.1.0',
+    display_version:     '0.1.1',
     publisher:           'The Appgineer',
     email:               'theappgineer@gmail.com',
-    //website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/???',
+    website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/104271',
 
     core_paired: function(core_) {
         core = core_;
         transport = core.services.RoonApiTransport;
+        waiting_zones = {};
+        monitoring_zones = {};
 
         transport.subscribe_zones((response, msg) => {
-            let zones = [];
-
             if (response == "Subscribed") {
-                zones = msg.zones;
-
-                zones.forEach((zone) => {
+                msg.zones.forEach((zone) => {
                     setup_queue_bot_monitoring(zone);
+                    check_for_match(zone);
                 });
             } else if (response == "Changed") {
                 if (msg.zones_added) {
-                    zones = msg.zones_added;
-
-                    zones.forEach((zone) => {
+                    msg.zones_added.forEach((zone) => {
                         setup_queue_bot_monitoring(zone);
+                        check_for_match(zone);
                     });
                 }
 
                 if (msg.zones_changed) {
-                    zones = msg.zones_changed;
-                }
-            }
-
-            if (zones) {
-                zones.forEach((zone) => {
-                    const on_match = waiting_zones[zone.zone_id];
-
-                    if (on_match && on_match.properties) {
-                        const is_subset = require('is-subset');
-
-                        if (is_subset(zone, on_match.properties)) {
-                            delete waiting_zones[zone.zone_id];
-
-                            if (on_match.cb) {
-                                on_match.cb(zone);
-                            }
+                    msg.zones_changed.forEach((zone) => {
+                        if (Object.keys(monitoring_zones).includes(zone.zone_id)) {
+                            monitoring_zones[zone.zone_id] = zone;
+                            check_for_match(zone);
                         }
-                    }
-                });
+                    });
+                }
+
+                if (msg.zones_removed) {
+                    msg.zones_removed.forEach((zone) => {
+                        delete waiting_zones[zone.zone_id];
+                        delete monitoring_zones[zone.zone_id];
+                    });
+                }
             }
         });
     },
@@ -85,6 +77,22 @@ var roon = new RoonApi({
         transport = undefined;
     }
 });
+
+function check_for_match(zone) {
+    const on_match = waiting_zones[zone.zone_id];
+
+    if (on_match && on_match.properties) {
+        const is_subset = require('is-subset');
+
+        if (is_subset(zone, on_match.properties)) {
+            delete waiting_zones[zone.zone_id];
+
+            if (on_match.cb) {
+                on_match.cb(zone);
+            }
+        }
+    }
+}
 
 function on_zone_property_changed(zone_id, properties, cb) {
     waiting_zones[zone_id] = { properties: properties, cb: cb };
@@ -96,9 +104,18 @@ function setup_queue_bot_monitoring(zone) {
         now_playing: { three_line: { line2: QUEUE_BOT } }
     };
 
-    console.log("Queue Bot monitoring activated for", zone.display_name);
-    zone_names[zone.display_name] = undefined;
-    svc_status.set_status('Monitoring Zones:\n' + Object.keys(zone_names).join('\n'), false);
+    if (!Object.keys(monitoring_zones).includes(zone.zone_id)) {
+        let zone_names = 'Monitoring Zones:';
+
+        monitoring_zones[zone.zone_id] = zone;
+
+        for (const zone_id in monitoring_zones) {
+            zone_names += '\n' + monitoring_zones[zone_id].display_name;
+        }
+        svc_status.set_status(zone_names, false);
+
+        console.log("Queue Bot monitoring activated for", zone.display_name);
+    }
 
     on_zone_property_changed(zone.zone_id, properties, (zone) => {
         const action = zone.now_playing.three_line.line1;
@@ -109,20 +126,40 @@ function setup_queue_bot_monitoring(zone) {
             case PAUSE:
                 transport.control(zone, 'pause', () => {
                     if (zone.is_next_allowed) {
+                        monitoring_zones[zone.zone_id] = undefined;     // We need fresh zone data
+
                         transport.control(zone, 'next', () => {
-                            transport.control(zone, 'stop', () => {
-                                setup_queue_bot_monitoring(zone);
-                            });
+                            if (monitoring_zones[zone.zone_id]) {
+                                // Zone data already refreshed
+                                get_into_stopped_state(monitoring_zones[zone.zone_id]);
+                            } else {
+                                // Wait for zone data refresh
+                                on_zone_property_changed(zone.zone_id, { zone_id: zone.zone_id }, (zone) => {
+                                    get_into_stopped_state(zone);
+                                });
+                            }
                         });
                     } else {
-                        transport.control(zone, 'stop', () => {
-                            setup_queue_bot_monitoring(zone);
-                        });
+                        setup_queue_bot_monitoring(zone);
                     }
                 });
                 break;
         }
     });
+}
+
+function get_into_stopped_state(zone) {
+    // Some Roon Ready device are in "stopped" state by now (e.g. AURALiC ARIES_G2)
+    // While others start playback again (e.g. PS Audio Directstream DAC)
+    // But then; sending stop while "stopped" starts playback on the AURALiC ARIES_G2
+    // So; check state before sending stop command
+    if (zone.state != 'stopped') {
+        transport.control(zone, 'stop', () => {
+            setup_queue_bot_monitoring(zone);
+        });
+    } else {
+        setup_queue_bot_monitoring(zone);
+    }
 }
 
 var svc_status = new RoonApiStatus(roon);
