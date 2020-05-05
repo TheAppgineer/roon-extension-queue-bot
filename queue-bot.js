@@ -29,7 +29,7 @@ var monitoring_zones = {};
 var roon = new RoonApi({
     extension_id:        'com.theappgineer.queue-bot',
     display_name:        QUEUE_BOT,
-    display_version:     '0.1.1',
+    display_version:     '0.1.2',
     publisher:           'The Appgineer',
     email:               'theappgineer@gmail.com',
     website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/104271',
@@ -126,19 +126,16 @@ function setup_queue_bot_monitoring(zone) {
             case PAUSE:
                 transport.control(zone, 'pause', () => {
                     if (zone.is_next_allowed) {
-                        monitoring_zones[zone.zone_id] = undefined;     // We need fresh zone data
-
-                        transport.control(zone, 'next', () => {
-                            if (monitoring_zones[zone.zone_id]) {
-                                // Zone data already refreshed
-                                get_into_stopped_state(monitoring_zones[zone.zone_id]);
-                            } else {
-                                // Wait for zone data refresh
-                                on_zone_property_changed(zone.zone_id, { zone_id: zone.zone_id }, (zone) => {
-                                    get_into_stopped_state(zone);
-                                });
-                            }
+                        // Wait for state playing...
+                        // (there can be intermediate states, like stopped, loading)
+                        on_zone_property_changed(zone.zone_id, { state: 'playing' }, (zone) => {
+                            transport.control(zone, 'stop', () => {
+                                setup_queue_bot_monitoring(zone);
+                            });
                         });
+
+                        // ...to be triggered by next command
+                        transport.control(zone, 'next');
                     } else {
                         setup_queue_bot_monitoring(zone);
                     }
@@ -146,20 +143,6 @@ function setup_queue_bot_monitoring(zone) {
                 break;
         }
     });
-}
-
-function get_into_stopped_state(zone) {
-    // Some Roon Ready device are in "stopped" state by now (e.g. AURALiC ARIES_G2)
-    // While others start playback again (e.g. PS Audio Directstream DAC)
-    // But then; sending stop while "stopped" starts playback on the AURALiC ARIES_G2
-    // So; check state before sending stop command
-    if (zone.state != 'stopped') {
-        transport.control(zone, 'stop', () => {
-            setup_queue_bot_monitoring(zone);
-        });
-    } else {
-        setup_queue_bot_monitoring(zone);
-    }
 }
 
 var svc_status = new RoonApiStatus(roon);
