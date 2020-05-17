@@ -16,6 +16,7 @@
 
 const QUEUE_BOT = 'Queue Bot';
 const PAUSE = 'Pause';
+const STANDBY = 'Standby';
 
 const RoonApi          = require('node-roon-api'),
       RoonApiStatus    = require('node-roon-api-status'),
@@ -25,11 +26,12 @@ var core = undefined;
 var transport = undefined;
 var waiting_zones = {};
 var monitoring_zones = {};
+var zone_names;
 
 var roon = new RoonApi({
     extension_id:        'com.theappgineer.queue-bot',
     display_name:        QUEUE_BOT,
-    display_version:     '0.1.2',
+    display_version:     '0.2.0',
     publisher:           'The Appgineer',
     email:               'theappgineer@gmail.com',
     website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/104271',
@@ -105,12 +107,13 @@ function setup_queue_bot_monitoring(zone) {
     };
 
     if (!Object.keys(monitoring_zones).includes(zone.zone_id)) {
-        let zone_names = 'Monitoring Zones:';
+        zone_names = 'Monitoring Zones:';
 
         monitoring_zones[zone.zone_id] = zone;
 
         for (const zone_id in monitoring_zones) {
-            zone_names += '\n' + monitoring_zones[zone_id].display_name;
+            zone_names += '\n\u2022 ' + monitoring_zones[zone_id].display_name;
+            zone_names += supports_standby(monitoring_zones[zone_id].outputs[0]);
         }
         svc_status.set_status(zone_names, false);
 
@@ -120,27 +123,47 @@ function setup_queue_bot_monitoring(zone) {
     on_zone_property_changed(zone.zone_id, properties, (zone) => {
         const action = zone.now_playing.three_line.line1;
 
-        console.log(`Action ${action} requested from zone ${zone.display_name}`);
+        svc_status.set_status(`Latest Action: ${zone.display_name} put into ${action}\n${zone_names}`, false);
 
-        switch (action) {
-            case PAUSE:
-                transport.control(zone, 'pause', () => {
-                    if (zone.is_next_allowed) {
-                        // Wait for state playing...
-                        // (there can be intermediate states, like stopped, loading)
-                        on_zone_property_changed(zone.zone_id, { state: 'playing' }, (zone) => {
-                            transport.control(zone, 'stop', () => {
-                                setup_queue_bot_monitoring(zone);
-                            });
-                        });
+        pause(zone, (zone) => {
+            setup_queue_bot_monitoring(zone);
 
-                        // ...to be triggered by next command
-                        transport.control(zone, 'next');
-                    } else {
-                        setup_queue_bot_monitoring(zone);
+            if (action == STANDBY) {
+                transport.standby(zone.outputs[0], {}, (err) => {
+                    if (err) {
+                        svc_status.set_status(`${zone.display_name} doesn't support ${action}`, true);
                     }
                 });
-                break;
+            }
+        });
+    });
+}
+
+function supports_standby(output) {
+    for (let i = 0; i < output.source_controls.length; i++) {
+        if (output.source_controls[i].supports_standby) {
+            return ' (supports Standby)';
+        }
+    };
+
+    return '';
+}
+
+function pause(zone, cb) {
+    transport.control(zone, 'pause', () => {
+        if (zone.is_next_allowed) {
+            // Wait for state playing...
+            // (there can be intermediate states, like stopped, loading)
+            on_zone_property_changed(zone.zone_id, { state: 'playing' }, (zone) => {
+                transport.control(zone, 'stop', () => {
+                    cb && cb(zone);
+                });
+            });
+
+            // ...to be triggered by next command
+            transport.control(zone, 'next');
+        } else {
+            cb && cb(zone);
         }
     });
 }

@@ -1,6 +1,6 @@
 {
     "name": "roon-extension-queue-bot",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "description": "Roon Extension that lets the queue take control",
     "main": "queue-bot.js",
     "author": "The Appgineer",
