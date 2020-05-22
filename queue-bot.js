@@ -31,7 +31,7 @@ var zone_names;
 var roon = new RoonApi({
     extension_id:        'com.theappgineer.queue-bot',
     display_name:        QUEUE_BOT,
-    display_version:     '0.2.0',
+    display_version:     '0.2.1',
     publisher:           'The Appgineer',
     email:               'theappgineer@gmail.com',
     website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/104271',
@@ -66,9 +66,11 @@ var roon = new RoonApi({
                 }
 
                 if (msg.zones_removed) {
-                    msg.zones_removed.forEach((zone) => {
-                        delete waiting_zones[zone.zone_id];
-                        delete monitoring_zones[zone.zone_id];
+                    msg.zones_removed.forEach((zone_id) => {
+                        delete waiting_zones[zone_id];
+                        delete monitoring_zones[zone_id];
+
+                        update_zone_names();
                     });
                 }
             }
@@ -107,17 +109,11 @@ function setup_queue_bot_monitoring(zone) {
     };
 
     if (!Object.keys(monitoring_zones).includes(zone.zone_id)) {
-        zone_names = 'Monitoring Zones:';
-
         monitoring_zones[zone.zone_id] = zone;
 
-        for (const zone_id in monitoring_zones) {
-            zone_names += '\n\u2022 ' + monitoring_zones[zone_id].display_name;
-            zone_names += supports_standby(monitoring_zones[zone_id].outputs[0]);
-        }
-        svc_status.set_status(zone_names, false);
-
         console.log("Queue Bot monitoring activated for", zone.display_name);
+
+        update_zone_names();
     }
 
     on_zone_property_changed(zone.zone_id, properties, (zone) => {
@@ -137,6 +133,17 @@ function setup_queue_bot_monitoring(zone) {
             }
         });
     });
+}
+
+function update_zone_names() {
+    zone_names = 'Monitoring Zones:';
+
+    for (const zone_id in monitoring_zones) {
+        zone_names += '\n\u2022 ' + monitoring_zones[zone_id].display_name;
+        zone_names += supports_standby(monitoring_zones[zone_id].outputs[0]);
+    }
+
+    svc_status.set_status(zone_names, false);
 }
 
 function supports_standby(output) {
