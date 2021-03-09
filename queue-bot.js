@@ -31,7 +31,7 @@ var zone_names;
 var roon = new RoonApi({
     extension_id:        'com.theappgineer.queue-bot',
     display_name:        QUEUE_BOT,
-    display_version:     '0.2.1',
+    display_version:     '0.2.2',
     publisher:           'The Appgineer',
     email:               'theappgineer@gmail.com',
     website:             'https://community.roonlabs.com/t/roon-extension-queue-bot/104271',
@@ -175,11 +175,23 @@ function pause(zone, cb) {
     });
 }
 
+function init_signal_handlers() {
+    const handle = function(signal) {
+        process.exit(0);
+    };
+
+    // Register signal handlers to enable a graceful stop of the container
+    process.on('SIGTERM', handle);
+    process.on('SIGINT', handle);
+}
+
 var svc_status = new RoonApiStatus(roon);
 
 roon.init_services({
     required_services:   [ RoonApiTransport ],
     provided_services:   [ svc_status ]
 });
+
+init_signal_handlers();
 
 roon.start_discovery();

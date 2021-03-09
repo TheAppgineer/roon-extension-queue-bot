@@ -1,10 +1,11 @@
 {
     "name": "roon-extension-queue-bot",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Roon Extension that lets the queue take control",
     "main": "queue-bot.js",
     "author": "The Appgineer",
     "license": "Apache-2.0",
+    "files": [],
     "dependencies": {
         "is-subset": "^0.1.1",
         "node-roon-api": "github:roonlabs/node-roon-api",
